@@ -6,7 +6,7 @@ from common.base_config import BaseConfig
 class BackendConfig(BaseConfig):
     """Configuration for the backend / LLM orchestration."""
 
-    _FILENAME = "backend.json"
+    _FILENAME = "backend_config.json"
 
     _REQUIRED: Mapping[str, Any] = {
         #--- websocket --------------------------------------------------

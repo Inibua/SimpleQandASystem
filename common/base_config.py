@@ -96,15 +96,6 @@ class BaseConfig:
                 f"The following required keys are missing in {self._FILENAME}: "
                 f"{', '.join(missing)}"
             )
-
-        # No strict prohibition of extra keys – they stay in the dict.
-        # If you ever want to forbid them, uncomment the next lines:
-        #
-        # extra = set(cfg) - set(self._REQUIRED)
-        # if extra:
-        #     raise ConfigError(
-        #         f"Unexpected keys in {self._FILENAME}: {', '.join(extra)}"
-        #     )
         return dict(cfg)  # return a plain dict
 
     # ------------------------------------------------------------------

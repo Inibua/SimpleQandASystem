@@ -6,7 +6,7 @@ from common.base_config import BaseConfig
 class UIConfig(BaseConfig):
     """Configuration for the Chainlit UI."""
 
-    _FILENAME = "ui.json"
+    _FILENAME = "ui_config.json"
 
     _REQUIRED: Mapping[str, Any] = {
         "host": "localhost",
