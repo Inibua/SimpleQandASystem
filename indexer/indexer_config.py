@@ -1,5 +1,5 @@
 from typing import Mapping, Any
-
+from dataclasses import dataclass
 from common.base_config import BaseConfig
 
 
@@ -25,3 +25,18 @@ class IndexerConfig(BaseConfig):
         "top_sparse": 10,
         "top_rerank": 5,
     }
+
+
+@dataclass
+class PDFProcessorConfig:
+    """Configuration for Docling PDF processing."""
+
+    def __init__(self,
+                 use_ocr: bool = True,
+                 ocr_language: str = 'eng',
+                 table_extraction: bool = True,
+                 include_images: bool = False):  # Images as metadata only
+        self.use_ocr = use_ocr
+        self.ocr_language = ocr_language
+        self.table_extraction = table_extraction
+        self.include_images = include_images
