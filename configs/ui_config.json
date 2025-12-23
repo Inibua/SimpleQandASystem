@@ -1,0 +1,8 @@
+{
+  "host": "localhost",
+  "port": 8001,
+  "debug": false,
+  "backend_host": "localhost",
+  "backend_port": 8000,
+  "backend_path": "/ws"
+}

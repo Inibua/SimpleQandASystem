@@ -5,18 +5,18 @@ Grounded answer generation with citation enforcement using Ollama and LangGraph.
 """
 
 import logging
-from typing import List, Dict, Any
+import re
 import requests
+from typing import List, Dict, Any
 from langgraph.graph.state import StateGraph, CompiledStateGraph, START, END
 from pydantic import BaseModel, Field
-
 from backend.backend_config import BackendConfig
 
 
 class GenerationState(BaseModel):
     """State for answer generation workflow."""
     query: str = Field(description="User's original question")
-    conversation_context: List[Dict] = Field(default_factory=list, description="Previous conversation turns")
+    conversation_context: Dict[str, Any] = Field(default_factory=dict, description="Conversation context with summary")
     retrieved_chunks: List[Dict] = Field(default_factory=list, description="Retrieved document chunks")
     answer: str = Field(default="", description="Generated answer")
     citations: List[Dict] = Field(default_factory=list, description="Citations mapping to chunks")
@@ -26,7 +26,7 @@ class GenerationState(BaseModel):
 
 class AnswerGenerator:
     """
-    Generates grounded answers with strict citation enforcement using LangGraph.
+    Generates grounded answers using summarized conversation context.
     """
 
     def __init__(self, config: BackendConfig):
@@ -39,17 +39,11 @@ class AnswerGenerator:
         workflow = StateGraph(GenerationState)
 
         # Define nodes
-        # workflow.add_node("validate_context", self._validate_context)
         workflow.add_node("generate_answer", self._generate_answer)
         workflow.add_node("extract_citations", self._extract_citations)
         workflow.add_node("create_clarification", self._create_clarification)
 
         # Define edges
-        # workflow.set_entry_point("validate_context")
-        # workflow.set_entry_point(START)
-
-        # workflow.add_edge("validate_context", "generate_answer", "has_context")
-        # workflow.add_edge("validate_context", "create_clarification", "no_context")
         workflow.add_conditional_edges(START, self._validate_context,
                                        {"no_context": "create_clarification", "has_context": "generate_answer"})
 
@@ -59,18 +53,10 @@ class AnswerGenerator:
 
         return workflow.compile()
 
-    async def generate_answer(self, query: str, conversation_context: List[Dict],
+    async def generate_answer(self, query: str, conversation_context: Dict[str, Any],
                               retrieved_chunks: List[Dict]) -> Dict[str, Any]:
         """
-        Generate a grounded answer with citations.
-
-        Args:
-            query: User's question
-            conversation_context: Previous conversation turns
-            retrieved_chunks: Retrieved document chunks from retrieval engine
-
-        Returns:
-            Dictionary containing answer, citations, and metadata
+        Generate a grounded answer with citations using summarized context.
         """
         self.logger.info(f"Generating answer for query: '{query}'")
 
@@ -109,18 +95,10 @@ class AnswerGenerator:
             state.should_answer = False
             return "no_context"
 
-        # Check if chunks are relevant (simple threshold - can be enhanced)
-        # relevant_chunks = [chunk for chunk in state.retrieved_chunks
-        #                    if chunk.get('scores', {}).get('final_score', 0) > 0.3]
-        #
-        # if not relevant_chunks:
-        #     state.should_answer = False
-        #     return "no_context"
-
         return "has_context"
 
     def _generate_answer(self, state: GenerationState) -> GenerationState:
-        """Generate answer using Ollama LLM with retrieved context."""
+        """Generate answer using Ollama LLM with retrieved context and conversation summary."""
         try:
             # Prepare context from retrieved chunks
             context_parts = []
@@ -133,20 +111,12 @@ class AnswerGenerator:
                 )
 
             context = "\n".join(context_parts)
-
-            # Prepare conversation history
-            history = ""
-            if state.conversation_context:
-                history = "Previous conversation:\n"
-                for turn in state.conversation_context[-2:]:  # Last 2 turns
-                    history += f"Q: {turn.get('question', '')}\nA: {turn.get('answer', '')}\n\n"
-
+            # Prepare conversation context (summary + recent turns)
+            conversation_context = self._build_conversation_context(state.conversation_context)
             # Generate prompt
-            prompt = self._build_prompt(state.query, context, history)
-
+            prompt = self._build_prompt(state.query, context, conversation_context)
             # Call Ollama
             response = self._call_ollama(prompt)
-
             state.answer = response.strip()
             return state
 
@@ -154,6 +124,45 @@ class AnswerGenerator:
             self.logger.error(f"LLM generation failed: {e}")
             state.answer = "I couldn't generate an answer due to an error. Please try again."
             return state
+
+    def _build_conversation_context(self, conversation_context: Dict[str, Any]) -> str:
+        """Build conversation context from summary and recent turns."""
+        parts = []
+        # Add conversation summary if available
+        if conversation_context.get("summary"):
+            parts.append(f"CONVERSATION SUMMARY: {conversation_context['summary']}")
+
+        # Add recent turns
+        recent_turns = conversation_context.get("recent_turns", [])
+        if recent_turns:
+            parts.append("RECENT CONVERSATION:")
+            for i, turn in enumerate(recent_turns, 1):
+                parts.append(f"Turn {i}: Q: {turn.get('question', '')}")
+                parts.append(f"       A: {turn.get('answer', '')}")
+
+        return "\n".join(parts) if parts else "No previous conversation context."
+
+    def _build_prompt(self, query: str, context: str, conversation_context: str) -> str:
+        """Build the prompt for answer generation with conversation context."""
+        return f"""You are a helpful assistant that answers questions based strictly on the provided context. You must cite your sources using [Source X:] notation.
+
+    GROUND RULES:
+    1. Answer ONLY using information from the provided context
+    2. Cite every factual statement with [Source X:] where X is the source number
+    3. If information isn't in the context, say you cannot answer
+    4. Be concise and accurate
+    5. Use multiple citations when information comes from multiple sources
+    6. Each citation must be on a new line
+
+    CONVERSATION CONTEXT:
+    {conversation_context}
+
+    DOCUMENT CONTEXT:
+    {context}
+
+    USER QUESTION: {query}
+
+    Your answer with citations:"""
 
     def _extract_citations(self, state: GenerationState) -> GenerationState:
         """Extract and validate citations from the generated answer."""
@@ -167,8 +176,7 @@ class AnswerGenerator:
             used_chunk_indices = set()
 
             # Extract citations from answer text
-            import re
-            citation_pattern = r'\[Source\s+(\d+)\]'
+            citation_pattern = r"\Source\s+(\d+)"
             matches = re.findall(citation_pattern, state.answer)
 
             for match in matches:
@@ -190,7 +198,7 @@ class AnswerGenerator:
             # Validate that citations are used
             if not citations:
                 self.logger.warning("No valid citations found in answer")
-                state.answer = "I cannot provide an answer without proper citations to the source documents."
+                state.answer = "I cannot provide an answer without proper citations to the source documents.\n" + state.answer
                 state.citations = []
             else:
                 state.citations = citations

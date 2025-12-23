@@ -6,7 +6,10 @@ Updated WebSocket server with answer generation integration.
 
 import logging
 import websockets
+import json
 from typing import Dict, Any
+
+from websockets import ServerConnection
 from backend.backend_config import BackendConfig
 from backend.session_manager import SessionManager
 from backend.query_validator import QueryValidator
@@ -20,7 +23,7 @@ class WebSocketServer:
     def __init__(self, config: BackendConfig):
         self.config = config
         self.logger = logging.getLogger(__name__)
-        self.session_manager = SessionManager()
+        self.session_manager = SessionManager(config)
         self.query_validator = QueryValidator(config)
 
         # Initialize retrieval and answer generation
@@ -50,19 +53,92 @@ class WebSocketServer:
             ping_timeout=10
         )
 
-        self.logger.info(f"WebSocket server running on ws://{self.config.host}:{self.config.port}{self.config.websocket_path}")
+        self.logger.info(
+            f"WebSocket server running on ws://{self.config.host}:{self.config.port}{self.config.websocket_path}")
 
         # Keep the server running
         await self.server.wait_closed()
 
-    # ... (handle_connection and handle_message remain the same) ...
+    async def stop_server(self):
+        """Stop the WebSocket server."""
+        if self.server:
+            self.server.close()
+            await self.server.wait_closed()
+            self.logger.info("WebSocket server stopped")
+
+    async def handle_connection(self, websocket: ServerConnection):
+        """Handle a new WebSocket connection."""
+        session_id = self.session_manager.create_session()
+        client_address = websocket.remote_address
+        self.logger.info(f"New connection from {client_address}, session: {session_id}")
+
+        try:
+            # Send session creation confirmation
+            await websocket.send(json.dumps({
+                "type": "session_created",
+                "session_id": session_id,
+                "status": "connected"
+            }))
+
+            # Handle incoming messages
+            async for message in websocket:
+                await self.handle_message(websocket, session_id, message)
+
+        except Exception as e:
+            self.logger.error(f"Error handling connection for session {session_id}: {e}")
+            raise e
+
+    async def handle_message(self, websocket: ServerConnection, session_id: str, message: str):
+        """Handle an incoming message from a client."""
+        try:
+            data = json.loads(message)
+
+            if data.get("type") != "query":
+                await websocket.send(json.dumps({
+                    "type": "error",
+                    "message": "Invalid message type. Expected 'query'."
+                }))
+                return
+
+            query = data.get("query", "").strip()
+
+            # Validate query
+            validation_error = self.query_validator.validate_query(query, session_id)
+            if validation_error:
+                await websocket.send(json.dumps({
+                    "type": "error",
+                    "message": validation_error
+                }))
+                return
+
+            # Send acknowledgment
+            await websocket.send(json.dumps({
+                "type": "processing",
+                "message": "Processing your query...",
+                "session_id": session_id
+            }))
+
+            # Process the query (retrieval and answer generation will be implemented in Steps 8-9)
+            response = await self.process_query(session_id, query)
+
+            # Send response
+            await websocket.send(json.dumps(response))
+
+        except json.JSONDecodeError:
+            await websocket.send(json.dumps({
+                "type": "error",
+                "message": "Invalid JSON format"
+            }))
+        except Exception as e:
+            self.logger.error(f"Error processing message for session {session_id}: {e}")
+            raise e
 
     async def process_query(self, session_id: str, query: str) -> Dict[str, Any]:
         """
-        Process a user query with full retrieval and answer generation pipeline.
+        Process a user query with summarization support.
         """
         try:
-            # Get session and conversation context
+            # Get session
             session = self.session_manager.get_session(session_id)
             if not session:
                 return {
@@ -71,41 +147,46 @@ class WebSocketServer:
                     "session_id": session_id
                 }
 
-            # Build conversation context from recent turns
-            conversation_context = []
+            # Check if we need to summarize the conversation
+            summarization_performed = await self.session_manager.maybe_summarize_conversation(session_id)
+            if summarization_performed:
+                self.logger.info(f"Summarization performed for session {session_id}")
+
+            # Get conversation context (now includes summary)
+            conversation_context = session.get_conversation_context()
+
+            # Perform retrieval (still uses recent turns for context, not summary)
+            recent_turns_for_retrieval = []
             recent_turns = session.get_recent_context(max_turns=2)
             for turn in recent_turns:
-                conversation_context.append({
+                recent_turns_for_retrieval.append({
                     "question": turn.question,
                     "answer": turn.answer
                 })
 
-            # Perform retrieval
-            retrieved_chunks = await self.retrieval_engine.retrieve(query, conversation_context)
+            retrieved_chunks = await self.retrieval_engine.retrieve(query, recent_turns_for_retrieval)
 
-            # Generate answer with citation enforcement
+            # Generate answer with full conversation context (summary + recent turns)
             generation_result = await self.answer_generator.generate_answer(
                 query, conversation_context, retrieved_chunks
             )
 
-            # Handle different outcomes
+            # Handle outcomes
             if not generation_result["should_answer"] and generation_result["clarification_question"]:
-                # Ask clarification question
                 return {
                     "type": "clarification",
                     "question": generation_result["clarification_question"],
                     "retrieved_chunks": [],
-                    "session_id": session_id
+                    "session_id": session_id,
+                    "summarization_performed": summarization_performed
                 }
             elif generation_result.get("error"):
-                # Error case
                 return {
                     "type": "error",
                     "message": generation_result["answer"],
                     "session_id": session_id
                 }
             else:
-                # Successful answer with citations
                 # Add to conversation history
                 session.add_turn(
                     query,
@@ -118,7 +199,9 @@ class WebSocketServer:
                     "answer": generation_result["answer"],
                     "citations": generation_result["citations"],
                     "retrieved_chunks_count": generation_result["retrieved_chunks_count"],
-                    "session_id": session_id
+                    "session_id": session_id,
+                    "summarization_performed": summarization_performed,
+                    "session_stats": self.session_manager.get_session_stats(session_id)
                 }
 
         except Exception as e:
