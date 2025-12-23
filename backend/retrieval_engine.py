@@ -69,15 +69,11 @@ class RetrievalEngine:
 
             # Step 2: Generate query embeddings
             query_embeddings = self._generate_query_embeddings(enhanced_query)
-            #
-            # # Step 3: Perform hybrid search (dense + sparse)
-            # hybrid_results = self._hybrid_search(query_embeddings)
-            #
-            # # Step 4: Apply re-ranking
-            # ranked_results = self._rerank_results(enhanced_query, hybrid_results)
+
+            # Step 3: Perform hybrid search (dense + sparse)
             ranked_results = self._retrieve_hybrid(query_embeddings)
 
-            # Step 5: Format results with traceable IDs and metadata
+            # Step 4: Format results with traceable IDs and metadata
             final_results = self._format_results(ranked_results)
 
             self.logger.info(f"Retrieval completed: {len(final_results)} results")
@@ -148,117 +144,6 @@ class RetrievalEngine:
             "sparse": sparse_vectors,
             "rerank": rerank_vector
         }
-        # dense_embedding = list(self.dense_embedder.embed([query]))[0]
-        #
-        # # Generate sparse embedding
-        # sparse_embedding = list(self.sparse_embedder.embed([query]))[0]
-        # sparse_indices = sparse_embedding.indices.tolist()
-        # sparse_values = sparse_embedding.values.tolist()
-        # sparse_vector = dict(zip(sparse_indices, sparse_values))
-        #
-        # return {
-        #     "dense": dense_embedding.tolist(),
-        #     "sparse": sparse_vector,
-        #     "query_text": query
-        # }
-
-    def _hybrid_search(self, query_embeddings: Dict[str, Any]) -> List[Dict[str, Any]]:
-        """Perform hybrid search using both dense and sparse vectors."""
-        dense_results = self._dense_search(query_embeddings["dense"])
-        sparse_results = self._sparse_search(query_embeddings["sparse"])
-
-        # Combine and deduplicate results
-        combined_results = self._combine_results(dense_results, sparse_results)
-
-        return combined_results
-
-    def _dense_search(self, dense_vector: List[float]) -> List[Dict[str, Any]]:
-        """Perform dense vector search."""
-        search_results = self.qdrant_client.query_points(
-            collection_name=self.config.collection_name,
-            query=dense_vector,
-            limit=self.config.top_dense,
-            with_payload=True
-        )
-
-        return [
-            {
-                "id": hit.id,
-                "score": hit.score,
-                "payload": hit.payload,
-                "type": "dense"
-            }
-            for hit in search_results
-        ]
-
-    def _sparse_search(self, sparse_vector: Dict[int, float]) -> List[Dict[str, Any]]:
-        """Perform sparse vector search."""
-        # Convert to Qdrant's sparse vector format
-        indices = list(sparse_vector.keys())
-        values = list(sparse_vector.values())
-        sparse_vec = SparseVector(indices=indices, values=values)
-
-        search_results = self.qdrant_client.query_points(
-            collection_name=self.config.collection_name,
-            query_vector=("sparse", sparse_vec),
-            limit=self.config.top_sparse,
-            with_payload=True,
-            with_vectors=False
-        )
-
-        return [
-            {
-                "id": hit.id,
-                "score": hit.score,
-                "payload": hit.payload,
-                "type": "sparse"
-            }
-            for hit in search_results
-        ]
-
-    def _combine_results(self, dense_results: List[Dict], sparse_results: List[Dict]) -> List[Dict]:
-        """Combine and deduplicate results from dense and sparse search."""
-        all_results = dense_results + sparse_results
-
-        # Deduplicate by chunk ID, keeping the highest score
-        unique_results = {}
-        for result in all_results:
-            chunk_id = result["payload"]["chunk_id"]
-            if chunk_id not in unique_results or result["score"] > unique_results[chunk_id]["score"]:
-                unique_results[chunk_id] = result
-
-        # Sort by score descending
-        sorted_results = sorted(unique_results.values(), key=lambda x: x["score"], reverse=True)
-
-        # Take top results for reranking
-        return sorted_results[:self.config.top_dense + self.config.top_sparse]
-
-    def _rerank_results(self, query: str, hybrid_results: List[Dict]) -> List[Dict]:
-        """Re-rank results using cross-encoder style re-ranking."""
-        if not hybrid_results:
-            return []
-
-        # Extract chunk texts for reranking
-        chunk_texts = [result["payload"]["chunk_text"] for result in hybrid_results]
-
-        # Generate rerank scores (FastEmbed's late interaction)
-        rerank_scores = list(self.rerank_embedder.embed(query, chunk_texts))
-
-        # Apply rerank scores to results
-        for i, result in enumerate(hybrid_results):
-            if i < len(rerank_scores):
-                result["rerank_score"] = float(rerank_scores[i])
-                # Combine original score with rerank score
-                result["final_score"] = (result["score"] + result["rerank_score"]) / 2
-            else:
-                result["rerank_score"] = 0.0
-                result["final_score"] = result["score"]
-
-        # Sort by final score
-        reranked_results = sorted(hybrid_results, key=lambda x: x["final_score"], reverse=True)
-
-        # Return top results after reranking
-        return reranked_results[:self.config.top_rerank]
 
     def _format_results(self, ranked_results: List[Dict]) -> List[Dict[str, Any]]:
         """Format results with traceable IDs and complete metadata."""
