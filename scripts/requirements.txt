@@ -3,3 +3,5 @@ docling == 2.65.0
 fastembed == 0.7.4
 qdrant_client == 1.16.2
 websockets == 15.0.1
+requests == 2.32.5
+pydantic == 2.12.5

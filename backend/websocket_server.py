@@ -1,20 +1,21 @@
 """
 websocket_server.py
 
-WebSocket server with integrated retrieval engine.
+Updated WebSocket server with answer generation integration.
 """
 
 import logging
 import websockets
-from typing import Dict, Any, List
+from typing import Dict, Any
 from backend.backend_config import BackendConfig
-from backend.session_manager import SessionManager, SessionState
+from backend.session_manager import SessionManager
 from backend.query_validator import QueryValidator
-from backend.retrieval_engine import RetrievalEngine  # Added import
+from backend.retrieval_engine import RetrievalEngine
+from backend.answer_generator import AnswerGenerator  # Added import
 
 
 class WebSocketServer:
-    """WebSocket server for handling client connections and queries."""
+    """WebSocket server with complete answer generation pipeline."""
 
     def __init__(self, config: BackendConfig):
         self.config = config
@@ -22,21 +23,23 @@ class WebSocketServer:
         self.session_manager = SessionManager()
         self.query_validator = QueryValidator(config)
 
-        # Initialize retrieval engine
+        # Initialize retrieval and answer generation
         self.retrieval_engine = RetrievalEngine(config)
+        self.answer_generator = AnswerGenerator(config)
         self.server = None
-
-        # Will be set by answer generation component
-        self.answer_generator = None
 
     async def start_server(self):
         """Start the WebSocket server."""
         self.logger.info(f"Starting WebSocket server on {self.config.host}:{self.config.port}")
 
-        # Health check retrieval engine
+        # Health checks
         if not self.retrieval_engine.health_check():
             self.logger.error("Retrieval engine health check failed")
             raise RuntimeError("Retrieval engine not ready")
+
+        if not self.answer_generator.health_check():
+            self.logger.error("Answer generator health check failed")
+            raise RuntimeError("Ollama not available")
 
         # Create and start the server
         self.server = await websockets.serve(
@@ -52,11 +55,11 @@ class WebSocketServer:
         # Keep the server running
         await self.server.wait_closed()
 
-    # ... (rest of the methods remain the same until process_query) ...
+    # ... (handle_connection and handle_message remain the same) ...
 
     async def process_query(self, session_id: str, query: str) -> Dict[str, Any]:
         """
-        Process a user query with retrieval engine.
+        Process a user query with full retrieval and answer generation pipeline.
         """
         try:
             # Get session and conversation context
@@ -64,7 +67,8 @@ class WebSocketServer:
             if not session:
                 return {
                     "type": "error",
-                    "message": "Session not found"
+                    "message": "Session not found",
+                    "session_id": session_id
                 }
 
             # Build conversation context from recent turns
@@ -79,29 +83,43 @@ class WebSocketServer:
             # Perform retrieval
             retrieved_chunks = await self.retrieval_engine.retrieve(query, conversation_context)
 
-            if not retrieved_chunks:
-                # No relevant context found - ask clarification question
+            # Generate answer with citation enforcement
+            generation_result = await self.answer_generator.generate_answer(
+                query, conversation_context, retrieved_chunks
+            )
+
+            # Handle different outcomes
+            if not generation_result["should_answer"] and generation_result["clarification_question"]:
+                # Ask clarification question
                 return {
                     "type": "clarification",
-                    "question": "I couldn't find relevant information in the documents. Could you provide more specific details or rephrase your question?",
+                    "question": generation_result["clarification_question"],
                     "retrieved_chunks": [],
                     "session_id": session_id
                 }
+            elif generation_result.get("error"):
+                # Error case
+                return {
+                    "type": "error",
+                    "message": generation_result["answer"],
+                    "session_id": session_id
+                }
+            else:
+                # Successful answer with citations
+                # Add to conversation history
+                session.add_turn(
+                    query,
+                    generation_result["answer"],
+                    retrieved_chunks
+                )
 
-            # For now, return retrieved chunks with placeholder answer
-            # This will be replaced with actual answer generation in Step 9
-            answer = self._generate_placeholder_answer(retrieved_chunks)
-
-            # Add to conversation history
-            session.add_turn(query, answer, retrieved_chunks)
-
-            return {
-                "type": "response",
-                "answer": answer,
-                "citations": self._extract_citations(retrieved_chunks),
-                "retrieved_chunks": retrieved_chunks,  # For debugging
-                "session_id": session_id
-            }
+                return {
+                    "type": "response",
+                    "answer": generation_result["answer"],
+                    "citations": generation_result["citations"],
+                    "retrieved_chunks_count": generation_result["retrieved_chunks_count"],
+                    "session_id": session_id
+                }
 
         except Exception as e:
             self.logger.error(f"Error processing query for session {session_id}: {e}")
@@ -110,30 +128,3 @@ class WebSocketServer:
                 "message": "Error processing query",
                 "session_id": session_id
             }
-
-    def _generate_placeholder_answer(self, retrieved_chunks: List[Dict]) -> str:
-        """Generate a placeholder answer showing retrieval worked."""
-        if not retrieved_chunks:
-            return "No relevant information found."
-
-        # Show that retrieval is working
-        doc_names = set(chunk["document_name"] for chunk in retrieved_chunks)
-        pages = set(chunk["page_number"] for chunk in retrieved_chunks)
-
-        return f"Retrieval successful! Found {len(retrieved_chunks)} relevant chunks from documents: {', '.join(doc_names)} (pages: {', '.join(map(str, pages))}). Answer generation will be implemented in the next step."
-
-    def _extract_citations(self, retrieved_chunks: List[Dict]) -> List[Dict]:
-        """Extract citation information from retrieved chunks."""
-        citations = []
-        for chunk in retrieved_chunks:
-            citations.append({
-                "document_name": chunk["document_name"],
-                "page_number": chunk["page_number"],
-                "section_heading": chunk.get("section_heading", ""),
-                "chunk_id": chunk["chunk_id"]
-            })
-        return citations
-
-    def set_answer_generator(self, generator):
-        """Set the answer generator (to be called from main)."""
-        self.answer_generator = generator
