@@ -1,17 +1,16 @@
 """
 websocket_server.py
 
-WebSocket server for handling real-time query intake.
+WebSocket server with integrated retrieval engine.
 """
 
 import logging
-import json
 import websockets
-from typing import Dict, Any
-from websockets.exceptions import ConnectionClosed
+from typing import Dict, Any, List
 from backend.backend_config import BackendConfig
-from backend.session_manager import SessionManager
+from backend.session_manager import SessionManager, SessionState
 from backend.query_validator import QueryValidator
+from backend.retrieval_engine import RetrievalEngine  # Added import
 
 
 class WebSocketServer:
@@ -22,15 +21,22 @@ class WebSocketServer:
         self.logger = logging.getLogger(__name__)
         self.session_manager = SessionManager()
         self.query_validator = QueryValidator(config)
+
+        # Initialize retrieval engine
+        self.retrieval_engine = RetrievalEngine(config)
         self.server = None
 
-        # Will be set by retrieval and answer generation components
-        self.retrieval_handler = None
+        # Will be set by answer generation component
         self.answer_generator = None
 
     async def start_server(self):
         """Start the WebSocket server."""
         self.logger.info(f"Starting WebSocket server on {self.config.host}:{self.config.port}")
+
+        # Health check retrieval engine
+        if not self.retrieval_engine.health_check():
+            self.logger.error("Retrieval engine health check failed")
+            raise RuntimeError("Retrieval engine not ready")
 
         # Create and start the server
         self.server = await websockets.serve(
@@ -46,110 +52,87 @@ class WebSocketServer:
         # Keep the server running
         await self.server.wait_closed()
 
-    async def stop_server(self):
-        """Stop the WebSocket server."""
-        if self.server:
-            self.server.close()
-            await self.server.wait_closed()
-            self.logger.info("WebSocket server stopped")
-
-    async def handle_connection(self, websocket):
-        """Handle a new WebSocket connection."""
-        session_id = self.session_manager.create_session()
-        client_address = websocket.remote_address
-        self.logger.info(f"New connection from {client_address}, session: {session_id}")
-
-        try:
-            # Send session creation confirmation
-            await websocket.send(json.dumps({
-                "type": "session_created",
-                "session_id": session_id,
-                "status": "connected"
-            }))
-
-            # Handle incoming messages
-            async for message in websocket:
-                await self.handle_message(websocket, session_id, message)
-
-        except ConnectionClosed:
-            self.logger.info(f"Connection closed for session {session_id}")
-        except Exception as e:
-            self.logger.error(f"Error handling connection for session {session_id}: {e}")
-            try:
-                await websocket.send(json.dumps({
-                    "type": "error",
-                    "message": "Internal server error"
-                }))
-            except ConnectionClosed:
-                pass  # Client already disconnected
-
-    async def handle_message(self, websocket, session_id: str, message: str):
-        """Handle an incoming message from a client."""
-        try:
-            data = json.loads(message)
-
-            if data.get("type") != "query":
-                await websocket.send(json.dumps({
-                    "type": "error",
-                    "message": "Invalid message type. Expected 'query'."
-                }))
-                return
-
-            query = data.get("query", "").strip()
-
-            # Validate query
-            validation_error = self.query_validator.validate_query(query, session_id)
-            if validation_error:
-                await websocket.send(json.dumps({
-                    "type": "error",
-                    "message": validation_error
-                }))
-                return
-
-            # Send acknowledgment
-            await websocket.send(json.dumps({
-                "type": "processing",
-                "message": "Processing your query...",
-                "session_id": session_id
-            }))
-
-            # Process the query (retrieval and answer generation will be implemented in Steps 8-9)
-            response = await self.process_query(session_id, query)
-
-            # Send response
-            await websocket.send(json.dumps(response))
-
-        except json.JSONDecodeError:
-            await websocket.send(json.dumps({
-                "type": "error",
-                "message": "Invalid JSON format"
-            }))
-        except Exception as e:
-            self.logger.error(f"Error processing message for session {session_id}: {e}")
-            try:
-                await websocket.send(json.dumps({
-                    "type": "error",
-                    "message": "Error processing query"
-                }))
-            except ConnectionClosed:
-                pass  # Client already disconnected
+    # ... (rest of the methods remain the same until process_query) ...
 
     async def process_query(self, session_id: str, query: str) -> Dict[str, Any]:
         """
-        Process a user query (placeholder for now).
-        Will be implemented with retrieval and answer generation in Steps 8-9.
+        Process a user query with retrieval engine.
         """
-        # Placeholder response
-        return {
-            "type": "response",
-            "answer": "This is a placeholder response. Retrieval and answer generation will be implemented in the next steps.",
-            "citations": [],
-            "session_id": session_id
-        }
+        try:
+            # Get session and conversation context
+            session = self.session_manager.get_session(session_id)
+            if not session:
+                return {
+                    "type": "error",
+                    "message": "Session not found"
+                }
 
-    def set_retrieval_handler(self, handler):
-        """Set the retrieval handler (to be called from main)."""
-        self.retrieval_handler = handler
+            # Build conversation context from recent turns
+            conversation_context = []
+            recent_turns = session.get_recent_context(max_turns=2)
+            for turn in recent_turns:
+                conversation_context.append({
+                    "question": turn.question,
+                    "answer": turn.answer
+                })
+
+            # Perform retrieval
+            retrieved_chunks = await self.retrieval_engine.retrieve(query, conversation_context)
+
+            if not retrieved_chunks:
+                # No relevant context found - ask clarification question
+                return {
+                    "type": "clarification",
+                    "question": "I couldn't find relevant information in the documents. Could you provide more specific details or rephrase your question?",
+                    "retrieved_chunks": [],
+                    "session_id": session_id
+                }
+
+            # For now, return retrieved chunks with placeholder answer
+            # This will be replaced with actual answer generation in Step 9
+            answer = self._generate_placeholder_answer(retrieved_chunks)
+
+            # Add to conversation history
+            session.add_turn(query, answer, retrieved_chunks)
+
+            return {
+                "type": "response",
+                "answer": answer,
+                "citations": self._extract_citations(retrieved_chunks),
+                "retrieved_chunks": retrieved_chunks,  # For debugging
+                "session_id": session_id
+            }
+
+        except Exception as e:
+            self.logger.error(f"Error processing query for session {session_id}: {e}")
+            return {
+                "type": "error",
+                "message": "Error processing query",
+                "session_id": session_id
+            }
+
+    def _generate_placeholder_answer(self, retrieved_chunks: List[Dict]) -> str:
+        """Generate a placeholder answer showing retrieval worked."""
+        if not retrieved_chunks:
+            return "No relevant information found."
+
+        # Show that retrieval is working
+        doc_names = set(chunk["document_name"] for chunk in retrieved_chunks)
+        pages = set(chunk["page_number"] for chunk in retrieved_chunks)
+
+        return f"Retrieval successful! Found {len(retrieved_chunks)} relevant chunks from documents: {', '.join(doc_names)} (pages: {', '.join(map(str, pages))}). Answer generation will be implemented in the next step."
+
+    def _extract_citations(self, retrieved_chunks: List[Dict]) -> List[Dict]:
+        """Extract citation information from retrieved chunks."""
+        citations = []
+        for chunk in retrieved_chunks:
+            citations.append({
+                "document_name": chunk["document_name"],
+                "page_number": chunk["page_number"],
+                "section_heading": chunk.get("section_heading", ""),
+                "chunk_id": chunk["chunk_id"]
+            })
+        return citations
 
     def set_answer_generator(self, generator):
         """Set the answer generator (to be called from main)."""

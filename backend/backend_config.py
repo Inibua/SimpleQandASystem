@@ -39,9 +39,14 @@ class BackendConfig(BaseConfig):
         "llm_port": 11434,
         "max_tokens": 4000,
 
+        # --- Embedding settings -------------------------------------------
+        "dense_embedding_model": "sentence-transformers/all-MiniLM-L6-v2",
+        "sparse_embedding_model": "Qdrant/bm25",
+        "rerank_embedding_model": "colbert-ir/colbertv2.0",
+
         # --- Qdrant settings ----------------------------------------------
         "qdrant_host": "localhost",
         "qdrant_http_port": 6333,
-        "qdrant_grpc_port": 6333,
+        "qdrant_grpc_port": 6334,
         "collection_name": "simple_kb",
     }
