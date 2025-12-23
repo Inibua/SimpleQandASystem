@@ -8,9 +8,9 @@ import logging
 from pathlib import Path
 
 from indexer.pdf_processor import PDFProcessor
-from indexer.document_chunker import DocumentChunker
-from indexer.embedding_indexer import EmbeddingGenerator
-from indexer.vector_store_indexer import VectorStoreIndexer
+from indexer.chunker import DocumentChunker
+from indexer.embedder import EmbeddingGenerator
+from indexer.vector_store import VectorStoreIndexer
 from indexer.indexer_config import IndexerConfig
 
 

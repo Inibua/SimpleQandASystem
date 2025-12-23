@@ -1,5 +1,5 @@
 """
-document_chunker.py
+chunker.py
 
 Document chunking implementation using Docling's HybridChunker.
 """

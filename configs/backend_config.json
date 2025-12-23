@@ -1,3 +1,23 @@
 {
+  "host": "localhost",
+  "port": 8000,
+  "websocket_path": "/ws",
+  "max_query_tokens": 1000,
+  "disable_token_limit": false,
+  "max_conversation_turns": 20,
+  "summarization_threshold": 10,
+  "top_dense": 10,
+  "top_sparse": 10,
+  "top_rerank": 5,
+  "llm_model": "llama2",
+  "llm_host": "localhost",
+  "llm_port": 11434,
+  "max_tokens": 4000,
+  "dense_embedding_model": "sentence-transformers/all-MiniLM-L6-v2",
+  "sparse_embedding_model": "Qdrant/bm25",
+  "rerank_embedding_model": "colbert-ir/colbertv2.0",
+  "qdrant_host": "localhost",
+  "qdrant_http_port": 6333,
+  "qdrant_grpc_port": 6334,
   "collection_name": "simple_kb"
 }

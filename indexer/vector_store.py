@@ -1,5 +1,5 @@
 """
-vector_store_indexer.py
+vector_store.py
 
 Qdrant vector store operations for storing and managing embeddings.
 """

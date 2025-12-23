@@ -1,4 +1,13 @@
 {
   "data_directory": "domaindata",
+  "chunk_size": 500,
+  "chunk_overlap": 50,
+  "logical_sectioning": true,
+  "dense_embedding_model": "sentence-transformers/all-MiniLM-L6-v2",
+  "sparse_embedding_model": "Qdrant/bm25",
+  "rerank_embedding_model": "colbert-ir/colbertv2.0",
+  "qdrant_host": "localhost",
+  "qdrant_http_port": 6333,
+  "qdrant_grpc_port": 6334,
   "collection_name": "simple_kb"
 }

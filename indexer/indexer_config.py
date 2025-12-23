@@ -11,7 +11,7 @@ class IndexerConfig(BaseConfig):
     # required keys → default (None means “no sensible default, must be present”)
     _REQUIRED: Mapping[str, Any] = {
         #--- data source -------------------------------------------------
-        "data_directory": "./domaindata",          # e.g. "./data/pdfs"
+        "data_directory": "domaindata",          # e.g. "./data/pdfs"
         #--- chunking ----------------------------------------------------
         "chunk_size": 500,                # max tokens per chunk (token‑based split)
         "chunk_overlap": 50,               # tokens that overlap between consecutive chunks
