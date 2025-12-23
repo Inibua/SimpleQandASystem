@@ -1,2 +1,4 @@
 langgraph == 1.0.0
 docling == 2.65.0
+fastembed == 0.7.4
+qdrant_client == 1.16.2

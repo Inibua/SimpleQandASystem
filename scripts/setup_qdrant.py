@@ -5,8 +5,9 @@ import urllib.request
 
 QDRANT_CONTAINER_NAME = "qdrant"
 QDRANT_IMAGE = "qdrant/qdrant:latest"
-QDRANT_PORT = 6333
-QDRANT_HEALTH_URL = f"http://localhost:{QDRANT_PORT}/healthz"
+QDRANT_HTTP_PORT = 6333
+QDRANT_GRPC_PORT = 6334
+QDRANT_HEALTH_URL = f"http://localhost:{QDRANT_HTTP_PORT}/healthz"
 
 
 def run_command(command: list[str]) -> None:
@@ -35,7 +36,9 @@ def start_qdrant() -> None:
                 "--name",
                 QDRANT_CONTAINER_NAME,
                 "-p",
-                f"{QDRANT_PORT}:6333",
+                f"{QDRANT_HTTP_PORT}:6333",
+                "-p",
+                f"{QDRANT_GRPC_PORT}:6334",
                 QDRANT_IMAGE,
             ]
         )

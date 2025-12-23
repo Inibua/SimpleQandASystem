@@ -17,13 +17,18 @@ class IndexerConfig(BaseConfig):
         "chunk_overlap": 50,               # tokens that overlap between consecutive chunks
         "logical_sectioning": True,      # try to split on headings before token split
         #--- embedding models --------------------------------------------
-        "dense_embedding_model": "all-MiniLM-L6-v2",
-        "sparse_embedding_model": "bm25",
-        "rerank_embedding_model": "colbert2.0",
+        "dense_embedding_model": "sentence-transformers/all-MiniLM-L6-v2",
+        "sparse_embedding_model": "Qdrant/bm25",
+        "rerank_embedding_model": "colbert-ir/colbertv2.0",
         #--- retrieval parameters ----------------------------------------
         "top_dense": 10,
         "top_sparse": 10,
         "top_rerank": 5,
+        # --- Qdrant settings --------------------------------------------
+        "qdrant_host": "localhost",
+        "qdrant_http_port": 6333,
+        "qdrant_grpc_port": 6334,
+        "collection_name": "simple_kb",
     }
 
 

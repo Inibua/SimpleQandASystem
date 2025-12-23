@@ -1,7 +1,7 @@
 """
 pdf_models.py
 
-Data models for markdown-based PDF processing.
+Data models for markdown-based PDF processing and chunking.
 """
 
 from dataclasses import dataclass, field
@@ -31,6 +31,28 @@ class DocumentElement:
 
 
 @dataclass
+class DocumentChunk:
+    """Represents a chunk of content for indexing."""
+    chunk_id: str
+    chunk_text: str
+    document_name: str
+    page_number: int
+    section_heading: str = ""
+    metadata: Dict[str, Any] = field(default_factory=dict)
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert chunk to dictionary for serialization."""
+        return {
+            "chunk_id": self.chunk_id,
+            "chunk_text": self.chunk_text,
+            "document_name": self.document_name,
+            "page_number": self.page_number,
+            "section_heading": self.section_heading,
+            "metadata": self.metadata
+        }
+
+
+@dataclass
 class PDFDocument:
     """Represents a processed PDF file with markdown elements."""
     file_path: Path
@@ -38,6 +60,7 @@ class PDFDocument:
     total_pages: int
     elements: List[DocumentElement] = field(default_factory=list)
     markdown_content: str = ""  # Store full markdown for reference
+    docling_document: Any = None  # Store the original Docling document for chunking
     metadata: Dict[str, Any] = field(default_factory=dict)
 
     def add_element(self, element: DocumentElement) -> None:

@@ -73,6 +73,7 @@ class PDFProcessor:
                 file_name=pdf_path.name,
                 total_pages=total_pages,
                 markdown_content=markdown_content,
+                docling_document=doc_result.document,
                 metadata={
                     "processing_library": "docling",
                     "file_size": pdf_path.stat().st_size,
